@@ -1,0 +1,489 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Ian Lucas. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+using System.Text;
+using CounterStrikeSharp.API;
+using CounterStrikeSharp.API.Core;
+using CounterStrikeSharp.API.Core.Translations;
+using CounterStrikeSharp.API.Modules.Admin;
+using CounterStrikeSharp.API.Modules.Cvars;
+using CounterStrikeSharp.API.Modules.Utils;
+using CounterStrikeSharp.API.ValveConstants.Protobuf;
+using Match.Get5.Events;
+
+namespace Match;
+
+public static class Rules
+{
+    private const ulong BotSteamIDBase = 1_000_000_000_000_000;
+    private const ulong BotSteamIDMask = 0x000F_FFFF_FFFF_FFFF;
+    public static readonly List<PlayerTeam> Teams = [];
+    public static readonly List<Map> Maps = [];
+    public static readonly PlayerTeam Team1;
+    public static readonly PlayerTeam Team2;
+    public static string? Id { get; set; } = null;
+    public static bool IsClinchSeries { get; set; } = true;
+    public static BaseState State { get; set; } = new();
+    public static bool IsLoadedFromFile { get; set; } = false;
+    public static bool IsSeriesStarted { get; set; } = false;
+    public static bool DidRestartFirstMap { get; set; } = false;
+    public static PlayerTeam? KnifeRoundWinner { get; set; }
+    public static MapEndResult? MapEndResult { get; set; } = null;
+    public static MatchEventStore? EventStore { get; private set; }
+    public static int Sequence { get; set; } = 0;
+
+    static Rules()
+    {
+        var team1 = new PlayerTeam(CsTeam.Terrorist);
+        var team2 = new PlayerTeam(CsTeam.CounterTerrorist);
+        team1.Opposition = team2;
+        team2.Opposition = team1;
+        Teams = [team1, team2];
+        Team1 = team1;
+        Team2 = team2;
+    }
+
+    public static void Reset()
+    {
+        EventStore?.Cancel();
+        EventStore = null;
+        Id = null;
+        IsClinchSeries = true;
+        IsLoadedFromFile = false;
+        IsSeriesStarted = false;
+        KnifeRoundWinner = null;
+        MapEndResult = null;
+        Maps.Clear();
+        Sequence = 0;
+        foreach (var team in Teams)
+            team.Reset();
+    }
+
+    public static void Setup()
+    {
+        if (Id == "" || !IsLoadedFromFile)
+            Id = Guid.NewGuid().ToString();
+        if (!IsLoadedFromFile)
+            Maps.Add(new(Server.MapName));
+        var idsInMatch = GetAllPlayers().Where(p => !p.IsBot).Select(p => p.SteamID);
+        foreach (var player in PlayerHelper.GetActualPlayers())
+            if (!idsInMatch.Contains(player.SteamID))
+                if (
+                    !ConVars.IsMatchmaking.Value
+                    || !ConVars.IsMatchmakingKick.Value
+                    || AdminManager.PlayerHasPermissions(player, "@css/config")
+                )
+                    player.ChangeTeam(CsTeam.Spectator);
+                else
+                    player.Kick(
+                        "Match is reserved for a lobby.",
+                        NetworkDisconnectionReason.NETWORK_DISCONNECT_REJECT_RESERVED_FOR_LOBBY
+                    );
+        foreach (var team in Teams)
+        {
+            ServerHelper.SetTeamName(team.StartingTeam, team.ServerName);
+            foreach (var player in team.Players)
+            {
+                player.DamageReport.Clear();
+                foreach (var opponent in team.Opposition.Players)
+                    player.DamageReport[opponent.Key] = new(opponent);
+            }
+        }
+        IsSeriesStarted = true;
+        CreateMatchFolder();
+        if (ConVars.IsEventStore.Value)
+            EventStore = new MatchEventStore(GetMatchPath());
+        Sequence = 0;
+        SendEvent(OnSeriesInitEvent.Create());
+    }
+
+    public static void SetState(BaseState newState)
+    {
+        if (newState is not ReadyupWarmupState && State.GetType() == newState.GetType())
+            return;
+        if (newState.Name != State.Name)
+            SendEvent(OnGameStateChangedEvent.Create(oldState: State, newState));
+        State.Unload();
+        Runtime.Log($"Unloaded {State.GetType().FullName}");
+        State = newState;
+        State.Load();
+        Runtime.Log($"Loaded {State.GetType().FullName}");
+    }
+
+    public static bool EnsureCorrectMap()
+    {
+        var currentInGameMap = Server.MapName;
+        var currentMap = GetMap();
+        if (
+            (currentMap != null && (currentInGameMap != currentMap.MapName))
+            || (ConVars.IsRestartFirstMap.Value && !DidRestartFirstMap)
+        )
+        {
+            // Next level change will be handled by the game.
+            if (ConVar.Find("nextlevel")?.StringValue != "")
+                return true;
+            DidRestartFirstMap = true;
+            var currentMapName = currentMap?.MapName ?? currentInGameMap;
+            Runtime.Log($"Need to change map to {currentMapName}");
+            Server.ExecuteCommand($"changelevel {currentMapName}");
+            return true;
+        }
+        return false;
+    }
+
+    public static void EnforceMatchmakingRestrictions()
+    {
+        if (!ConVars.IsMatchmaking.Value)
+            return;
+        foreach (var player in PlayerHelper.GetActualPlayers())
+            if (player.GetState() == null)
+                if (AdminManager.PlayerHasPermissions(player, "@css/root"))
+                    player.ChangeTeam(CsTeam.Spectator);
+                else
+                    player.Kick(
+                        "Match is reserved for a lobby.",
+                        NetworkDisconnectionReason.NETWORK_DISCONNECT_REJECT_RESERVED_FOR_LOBBY
+                    );
+    }
+
+    public static void ConfigureTeamFromSchema(
+        int teamIndex,
+        Get5.Get5MatchTeam schema,
+        ulong? leaderId = null
+    )
+    {
+        if (teamIndex < 0 || teamIndex >= Teams.Count)
+            return;
+
+        var team = Teams[teamIndex];
+        team.Id = schema.Id ?? "";
+        team.Name = schema.Name ?? "";
+        team.SeriesScore = schema.SeriesScore ?? 0;
+
+        var players = schema.Players.Get();
+        if (players == null)
+            return;
+
+        bool electedInGameLeader = false;
+
+        foreach (var playerSchema in players)
+        {
+            var steamId = playerSchema.Key;
+            var player = new PlayerState(
+                steamId,
+                playerSchema.Value,
+                team,
+                PlayerHelper.GetPlayerFromSteamID(steamId)
+            );
+            team.AddPlayer(player);
+
+            if (!electedInGameLeader && (leaderId == null || steamId == leaderId))
+            {
+                electedInGameLeader = true;
+                team.InGameLeader = player;
+            }
+        }
+    }
+
+    public static bool IsMatchmaking()
+    {
+        return IsLoadedFromFile && ConVars.IsMatchmaking.Value;
+    }
+
+    public static bool AreTeamsLocked()
+    {
+        return IsLoadedFromFile || State is not ReadyupWarmupState;
+    }
+
+    public static string GetChatPrefix(bool stripColors = false)
+    {
+        return stripColors
+            ? ConVars.ChatPrefix.Value.StripColorTags()
+            : ConVars.ChatPrefix.Value.ReplaceColorTags();
+    }
+
+    public static IEnumerable<PlayerState> GetAllPlayers()
+    {
+        return Teams.SelectMany(t => t.Players);
+    }
+
+    public static PlayerState? GetPlayerStateFromSteamID(ulong steamId)
+    {
+        return GetAllPlayers().FirstOrDefault(p => p.SteamID == steamId);
+    }
+
+    public static PlayerState? GetBotStateFromName(string name)
+    {
+        return GetAllPlayers().FirstOrDefault(p => p.IsBot && p.Name == name);
+    }
+
+    public static PlayerState? GetPlayerState(CCSPlayerController player)
+    {
+        if (!player.IsBot)
+            return GetPlayerStateFromSteamID(player.SteamID);
+        // Bot controllers only exist after ClientPutInServer, which runs after player_connect.
+        return player.IsValid ? GetBotStateFromName(player.PlayerName) : null;
+    }
+
+    public static ulong GetEventSteamID(CCSPlayerController player) =>
+        player.IsBot ? GetBotSteamID(player.PlayerName) : player.SteamID;
+
+    public static ulong GetBotSteamID(string name)
+    {
+        ulong hash = 14695981039346656037;
+        foreach (var value in Encoding.UTF8.GetBytes(name))
+        {
+            hash ^= value;
+            hash = unchecked(hash * 1099511628211);
+        }
+        return BotSteamIDBase + (hash & BotSteamIDMask);
+    }
+
+    public static void SynchronizeBots()
+    {
+        if (State is not LiveState)
+            return;
+
+        var bots = PlayerHelper
+            .GetAllValidPlayers()
+            .Where(player => player.IsBot)
+            .Where(player => player.Team is CsTeam.Terrorist or CsTeam.CounterTerrorist)
+            .ToList();
+        var connectedBots = bots.ToHashSet();
+        foreach (var player in GetAllPlayers().Where(player => player.IsBot))
+            if (player.Handle != null && !connectedBots.Contains(player.Handle))
+                player.Handle = null;
+
+        bool changed = false;
+        foreach (var bot in bots)
+        {
+            var team = GetTeam(bot.Team);
+            if (team == null)
+                continue;
+            var player = GetBotStateFromName(bot.PlayerName);
+            if (player == null)
+            {
+                player = new(0, bot.PlayerName, team, bot, isBot: true);
+                team.AddPlayer(player);
+                changed = true;
+            }
+            else
+            {
+                player.Handle = bot;
+                if (player.Team != team)
+                {
+                    player.LeaveTeam();
+                    player.Team = team;
+                    team.AddPlayer(player);
+                    changed = true;
+                }
+            }
+        }
+        if (changed)
+            RebuildDamageReports();
+    }
+
+    private static void RebuildDamageReports()
+    {
+        foreach (var team in Teams)
+        foreach (var player in team.Players)
+        {
+            player.DamageReport.Clear();
+            foreach (var opponent in team.Opposition.Players)
+                player.DamageReport[opponent.Key] = new(opponent);
+        }
+    }
+
+    public static int GetNeededPlayersCount()
+    {
+        return IsLoadedFromFile ? GetAllPlayers().Count() : ConVars.PlayersNeeded.Value;
+    }
+
+    public static int GetReadyPlayersCount()
+    {
+        return GetAllPlayers().Count(p => p.IsReady);
+    }
+
+    public static bool AreAllPlayersReady()
+    {
+        return GetAllPlayers().All(p => p.IsReady);
+    }
+
+    public static PlayerTeam? GetTeam(CsTeam team)
+    {
+        return Teams.FirstOrDefault(t => t.StartingTeam == team);
+    }
+
+    public static bool HasTeamsWithAnyHumanConnected()
+    {
+        return Teams.All(t => t.Players.Any(p => !p.IsBot && p.Handle != null));
+    }
+
+    public static IEnumerable<PlayerTeam> GetUnreadyTeams()
+    {
+        return Teams.Where(t => t.Players.Any(p => !p.IsReady));
+    }
+
+    public static IEnumerable<PlayerTeam> GetTeamsWithConnectedPlayers()
+    {
+        return Teams.Where(t => t.Players.Any(p => p.Handle != null));
+    }
+
+    public static bool AreAllTeamsReadyToUnpause()
+    {
+        return Teams.All(team => team.IsUnpauseMatch);
+    }
+
+    public static Map? GetMap()
+    {
+        return Maps.FirstOrDefault(m => m.Result == MapResult.None);
+    }
+
+    public static Map? GetNextMap()
+    {
+        var maps = Maps.Where(m => m.Result == MapResult.None).ToList();
+        if (maps.Count > 1)
+            return maps[1];
+        return null;
+    }
+
+    public static int GetMapIndex()
+    {
+        var map = GetMap();
+        if (map == null)
+            return 0;
+        return Maps.IndexOf(map);
+    }
+
+    public static int FindMapIndex(Map? map)
+    {
+        return map != null ? Maps.IndexOf(map) : 0;
+    }
+
+    public static void AddMap(string mapName)
+    {
+        Maps.Add(new Map(mapName));
+    }
+
+    public static bool IsFirstMap()
+    {
+        return Maps.FirstOrDefault()?.MapName == GetMap()?.MapName;
+    }
+
+    public static int GetTotalMapCount()
+    {
+        return Maps.Count;
+    }
+
+    public static IEnumerable<Map> GetCompletedMaps()
+    {
+        var maps = Maps.Count > 0 ? Maps : new List<Map>();
+        return maps.Where(m => m.Result != MapResult.None);
+    }
+
+    public static long GetRoundTime()
+    {
+        return State is LiveState state ? TimeHelper.Now() - state.RoundStartedAt : 0;
+    }
+
+    public static int GetRoundNumber() =>
+        State is LiveState state
+            ? state.Round > -1
+                ? state.Round
+                : 0
+            : 0;
+
+    public static string GetMatchFolder()
+    {
+        return Id != null ? $"/{(IsLoadedFromFile ? "Matches" : "Scrims")}/{Id}" : "";
+    }
+
+    public static string GetMatchPath(string filename = "") =>
+        PathHelper.GetConfigPath($"{GetMatchFolder()}{(filename != "" ? $"/{filename}" : "")}");
+
+    public static DirectoryInfo CreateMatchFolder()
+    {
+        return Directory.CreateDirectory(GetMatchPath());
+    }
+
+    public static string? GetBackupPrefix()
+    {
+        return Id != null ? GetMatchPath(Server.MapName) : null;
+    }
+
+    public static string? GetDemoFilename()
+    {
+        return Id != null ? GetMatchPath($"{Server.MapName}.dem") : null;
+    }
+
+    public static void FinalizeEventLog()
+    {
+        EventStore?.Complete();
+        EventStore = null;
+    }
+
+    public static void SwapTeamSides()
+    {
+        foreach (var team in Teams)
+            team.StartingTeam = team.StartingTeam.Toggle();
+    }
+
+    public static void ResetTeamsForNewMatch()
+    {
+        foreach (var team in Teams)
+        {
+            team.Stats = new();
+            foreach (var player in team.Players)
+            {
+                player.IsReady = false;
+                player.Stats = new(player.EventSteamID);
+            }
+        }
+    }
+
+    public static void ResetAllPlayerAndTeamStats()
+    {
+        foreach (var player in GetAllPlayers())
+            player.Stats = new(player.EventSteamID);
+
+        foreach (var team in Teams)
+            team.Stats = new();
+    }
+
+    public static void ClearAllTeamUnpauseFlags()
+    {
+        foreach (var team in Teams)
+            team.IsUnpauseMatch = false;
+    }
+
+    public static void ClearAllSurrenderFlags()
+    {
+        foreach (var team in Teams)
+            team.IsSurrended = false;
+    }
+
+    public static void ResetAllKnifeRoundVotes()
+    {
+        foreach (var player in GetAllPlayers())
+            player.KnifeRoundVote = KnifeRoundVote.None;
+    }
+
+    public static void SendEvent(Get5Event data)
+    {
+        data.Sequence = Sequence++;
+        var url = ConVars.RemoteLogUrl.Value;
+        Runtime.Log($"RemoteLogUrl='{url}' event='{data.EventName}'");
+        if (url != "")
+        {
+            var headers = new Dictionary<string, string>();
+            if (ConVars.ServerId.Value != "")
+                headers.Add("Get5-ServerId", ConVars.ServerId.Value);
+            if (ConVars.RemoteLogHeaderKey.Value != "" && ConVars.RemoteLogHeaderValue.Value != "")
+                headers.Add(ConVars.RemoteLogHeaderKey.Value, ConVars.RemoteLogHeaderValue.Value);
+            HttpHelper.SendJson(url, data, headers);
+        }
+        EventStore?.Enqueue(data);
+    }
+}

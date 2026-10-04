@@ -9,30 +9,33 @@ namespace Match;
 
 public static class CTakeDamageInfoExtensions
 {
-    public static string? GetInflictorDesignerName(this CTakeDamageInfo self)
+    extension(CTakeDamageInfo self)
     {
-        var inflictor = self.Inflictor.Value;
-        if (inflictor == null)
-            return null;
-        if (inflictor.DesignerName == "molotov_projectile")
-            return inflictor.As<CMolotovProjectile>().IsIncGrenade
-                ? "weapon_incgrenade"
-                : "weapon_molotov";
-        if (inflictor.DesignerName.Contains("_projectile"))
-            return $"weapon_{inflictor.DesignerName.Replace("_projectile", "")}";
-        uint? defIndex = null;
-        if (inflictor.DesignerName == "player")
-            defIndex = inflictor
-                .As<CCSPlayerPawn>()
-                .WeaponServices?.ActiveWeapon.Value?.AttributeManager.Item.ItemDefinitionIndex;
-        if (inflictor.DesignerName == "inferno")
-            defIndex = inflictor.As<CInferno>().SourceItemDefIndex;
-        if (defIndex != null)
+        public string? GetInflictorDesignerName()
         {
-            var item = SchemaHelper.GetItemSchema()?.GetItemDefinition(defIndex.Value);
-            if (item != null)
-                return item.DefinitionName;
+            var inflictor = self.Inflictor.Value;
+            if (inflictor == null)
+                return null;
+            if (inflictor.DesignerName == "molotov_projectile")
+                return inflictor.As<CMolotovProjectile>().IsIncGrenade
+                    ? "weapon_incgrenade"
+                    : "weapon_molotov";
+            if (inflictor.DesignerName.Contains("_projectile"))
+                return $"weapon_{inflictor.DesignerName.Replace("_projectile", "")}";
+            uint? defIndex = null;
+            if (inflictor.DesignerName == "player")
+                defIndex = inflictor
+                    .As<CCSPlayerPawn>()
+                    .WeaponServices?.ActiveWeapon.Value?.AttributeManager.Item.ItemDefinitionIndex;
+            if (inflictor.DesignerName == "inferno")
+                defIndex = inflictor.As<CInferno>().SourceItemDefIndex;
+            if (defIndex != null)
+            {
+                var item = SchemaHelper.GetItemSchema()?.GetItemDefinition(defIndex.Value);
+                if (item != null)
+                    return item.DefinitionName;
+            }
+            return inflictor.DesignerName;
         }
-        return inflictor.DesignerName;
     }
 }

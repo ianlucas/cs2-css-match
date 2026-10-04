@@ -9,12 +9,15 @@ namespace Match;
 
 public static class CsTeamExtensions
 {
-    public static CsTeam Toggle(this CsTeam self)
+    extension(CsTeam self)
     {
-        return self > CsTeam.Spectator
-            ? self == CsTeam.Terrorist
-                ? CsTeam.CounterTerrorist
-                : CsTeam.Terrorist
-            : self;
+        public CsTeam Toggle()
+        {
+            return self > CsTeam.Spectator
+                ? self == CsTeam.Terrorist
+                    ? CsTeam.CounterTerrorist
+                    : CsTeam.Terrorist
+                : self;
+        }
     }
 }

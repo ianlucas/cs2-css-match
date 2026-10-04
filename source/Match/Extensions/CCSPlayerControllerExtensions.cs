@@ -11,37 +11,36 @@ namespace Match;
 
 public static class CCSPlayerControllerExtensions
 {
-    public static bool SetPlayerClan(this CCSPlayerController self, string clan)
+    extension(CCSPlayerController self)
     {
-        if (self.Clan != clan)
+        public bool SetPlayerClan(string clan)
         {
-            self.Clan = clan;
-            Utilities.SetStateChanged(self, "CCSPlayerController", "m_szClan");
-            return true;
+            if (self.Clan != clan)
+            {
+                self.Clan = clan;
+                Utilities.SetStateChanged(self, "CCSPlayerController", "m_szClan");
+                return true;
+            }
+            return false;
         }
-        return false;
-    }
 
-    public static int GetHealth(this CCSPlayerController self)
-    {
-        return Math.Max(
-            (self.SteamID == 0 ? self.Pawn.Value : self.PlayerPawn.Value)?.Health ?? 0,
-            0
-        );
-    }
+        public int GetHealth()
+        {
+            return Math.Max(
+                (self.SteamID == 0 ? self.Pawn.Value : self.PlayerPawn.Value)?.Health ?? 0,
+                0
+            );
+        }
 
-    public static PlayerState? GetState(this CCSPlayerController self)
-    {
-        return Rules.GetPlayerState(self);
-    }
+        public PlayerState? GetState()
+        {
+            return Rules.GetPlayerState(self);
+        }
 
-    public static void Kick(
-        this CCSPlayerController self,
-        string reason,
-        NetworkDisconnectionReason gameReason
-    )
-    {
-        Runtime.Log($"Kicking {self.PlayerName}: {reason}");
-        self.Disconnect(gameReason);
+        public void Kick(string reason, NetworkDisconnectionReason gameReason)
+        {
+            Runtime.Log($"Kicking {self.PlayerName}: {reason}");
+            self.Disconnect(gameReason);
+        }
     }
 }

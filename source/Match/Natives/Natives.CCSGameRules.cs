@@ -17,7 +17,7 @@ public static partial class Natives
         GameData.GetSignature("CCSGameRules::AreTeamsPlayingSwitchedSides")
     );
 
-    public static readonly MemoryFunctionWithReturn<nint, nint> CCSGameRules_HandleSwapTeams = new(
+    public static readonly MemoryFunctionVoid<nint> CCSGameRules_HandleSwapTeams = new(
         GameData.GetSignature("CCSGameRules::HandleSwapTeams")
     );
 

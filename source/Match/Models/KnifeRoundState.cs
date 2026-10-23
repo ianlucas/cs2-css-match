@@ -57,7 +57,6 @@ public class KnifeRoundState : ReadyupWarmupState
 
     public HookResult OnIncrementNumMVPsPre(DynamicHook hook)
     {
-        hook.SetReturn<nint>(0);
         return HookResult.Stop;
     }
 

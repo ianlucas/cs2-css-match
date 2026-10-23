@@ -10,6 +10,7 @@ namespace Match;
 
 public static partial class Natives
 {
-    public static readonly MemoryFunctionWithReturn<nint, byte> CCSBotManager_MaintainBotQuota =
-        new(GameData.GetSignature("CCSBotManager::MaintainBotQuota"));
+    public static readonly MemoryFunctionVoid<nint> CCSBotManager_MaintainBotQuota = new(
+        GameData.GetSignature("CCSBotManager::MaintainBotQuota")
+    );
 }

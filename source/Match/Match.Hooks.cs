@@ -33,7 +33,6 @@ public partial class Match
 
     public HookResult OnMaintainBotQuotaPre(DynamicHook hook)
     {
-        hook.SetReturn<byte>(0);
         if (!ConVars.IsBots.Value)
         {
             if (DidKickBots)

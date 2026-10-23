@@ -10,11 +10,7 @@ namespace Match;
 
 public static partial class Natives
 {
-    public static readonly MemoryFunctionWithReturn<
-        nint,
-        uint,
-        nint
-    > CCSPlayerPawnBase_IncrementNumMVPs = new(
+    public static readonly MemoryFunctionVoid<nint, uint> CCSPlayerPawnBase_IncrementNumMVPs = new(
         GameData.GetSignature("CCSPlayerPawnBase::IncrementNumMVPs")
     );
 }

@@ -413,6 +413,17 @@ public static class Rules
         return Id != null ? GetMatchPath(Server.MapName) : null;
     }
 
+    // The game refuses round backup paths that are absolute or contain `..` or `:`, and resolves
+    // the others against `game/csgo`.
+    public static bool IsGameBackupPathAllowed(string path) =>
+        !Path.IsPathRooted(path)
+        && !path.StartsWith('\\')
+        && !path.Contains("..")
+        && !path.Contains(':');
+
+    public static string? GetGameBackupPrefix() =>
+        Id != null ? PathHelper.GetConfigConVarPath($"{GetMatchFolder()}/{Server.MapName}") : null;
+
     public static string? GetDemoFilename()
     {
         return Id != null ? GetMatchPath($"{Server.MapName}.dem") : null;

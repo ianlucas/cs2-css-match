@@ -121,15 +121,19 @@ public partial class LiveState
         if (_isRestoring)
             return HookResult.Continue;
         var filename = info.GetArg(1);
+        // The game refuses this path, so nothing gets restored.
+        if (!Rules.IsGameBackupPathAllowed(filename))
+            return HookResult.Continue;
+        var path = PathHelper.GetCSGOPath(filename);
         var match = Regex.Match(filename, @"_round(\d+)\.txt$", RegexOptions.IgnoreCase);
-        if (match.Success && File.Exists(filename))
+        if (match.Success && File.Exists(path))
         {
             Runtime.Log(
                 $"Out-of-band backup restore detected ({filename}), restoring stats.",
                 force: true
             );
             PrepareForRestore(int.Parse(match.Groups[1].Value));
-            Rules.SendEvent(OnBackupRestoreEvent.Create(filename));
+            Rules.SendEvent(OnBackupRestoreEvent.Create(path));
         }
         else
             Runtime.Log(
@@ -162,11 +166,13 @@ public partial class LiveState
                     player?.PlayerName ?? "Console"
                 ]
             );
-            // `mp_backup_restore_load_file` can only fail when the file is not found, but we
-            // already had a check for that.
+            // Besides a missing file, `mp_backup_restore_load_file` only fails without the
+            // `-allow_round_backup_files` launch option, which saving the file also needed.
             PrepareForRestore(roundAsInt);
             Rules.SendEvent(OnBackupRestoreEvent.Create(filename));
-            Server.ExecuteCommand($"mp_backup_restore_load_file \"{filename}\"");
+            Server.ExecuteCommand(
+                $"mp_backup_restore_load_file \"{Rules.GetGameBackupPrefix()}_round{round}.txt\""
+            );
         }
         else
             player?.PrintToChat(

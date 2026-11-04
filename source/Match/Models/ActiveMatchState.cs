@@ -5,6 +5,7 @@
 
 using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
+using CounterStrikeSharp.API.Modules.Cvars;
 using CounterStrikeSharp.API.Modules.Entities.Constants;
 using CounterStrikeSharp.API.Modules.Utils;
 using Match.Get5.Events;
@@ -98,6 +99,10 @@ public class ActiveMatchState : BaseState
                     team1.SeriesScore > team2.SeriesScore ? team1
                     : team2.SeriesScore > team1.SeriesScore ? team2
                     : null;
+            // Matchmaking warm-up points `nextlevel` at the next series map; clear it so the series
+            // ends on the restart's round prestart, or when the next map loads.
+            if (ConVars.IsMatchmaking.Value)
+                ConVar.Find("nextlevel")?.StringValue = "";
         }
         Rules.MapEndResult = new MapEndResult
         {

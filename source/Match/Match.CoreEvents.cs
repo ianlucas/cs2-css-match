@@ -31,7 +31,12 @@ public partial class Match
     {
         OnIsBotsChanged(null, ConVars.IsBots.Value);
         OnIsMatchmakingChanged(null, ConVars.IsMatchmaking.Value);
-        Rules.SetState(Rules.IsSeriesStarted ? new ReadyupWarmupState() : new NoneState());
+        // A level change after the intermission skips the round prestart that ends the map, so a
+        // pending map end is finished on the next map.
+        if (Rules.MapEndResult != null && Rules.State is ActiveMatchState state)
+            state.OnMapEnd();
+        else
+            Rules.SetState(Rules.IsSeriesStarted ? new ReadyupWarmupState() : new NoneState());
     }
 
     public void OnClientAuthorized(int playerSlot, SteamID _)

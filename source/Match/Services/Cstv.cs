@@ -58,7 +58,7 @@ public static class Cstv
 
     public static string? GetFilename() => Filename;
 
-    public static bool IsEnabled() => ConVar.Find("tv_enable")?.GetPrimitiveValue<bool>() == true;
+    public static bool IsEnabled() => ConVar<bool>.Find("tv_enable")?.Value == true;
 
     public static void Set(bool value)
     {

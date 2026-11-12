@@ -54,5 +54,23 @@
       "windows": "40 55 41 57 48 8D 6C 24 ? 48 81 EC ? ? ? ? 4C 8B F9 FF 15",
       "linux": "55 31 F6 48 89 E5 41 57 49 89 FF"
     }
+  },
+  "CEconItemDefinition::m_nDefIndex": {
+    "offsets": {
+      "windows": 16,
+      "linux": 16
+    }
+  },
+  "CEconItemDefinition::m_pszDefinitionName": {
+    "offsets": {
+      "windows": 608,
+      "linux": 608
+    }
+  },
+  "CEconItemDefinition::m_iDefaultLoadoutSlot": {
+    "offsets": {
+      "windows": 824,
+      "linux": 824
+    }
   }
 }

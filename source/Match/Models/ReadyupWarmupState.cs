@@ -40,7 +40,7 @@ public class ReadyupWarmupState : WarmupState
         if (this is not NoneState && ConVars.IsMatchmaking.Value)
         {
             var nextMap = Rules.GetNextMap();
-            ConVar.Find("nextlevel")?.StringValue = nextMap?.MapName ?? "";
+            ConVar<string>.Find("nextlevel")?.Value = nextMap?.MapName ?? "";
             _warmupStart = TimeHelper.NowSeconds();
             if (IsBo1)
             {

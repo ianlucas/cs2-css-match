@@ -21,14 +21,11 @@ public static class TimeHelper
     public static CancellationTokenSource DelayTicks(int ticks, Action callback)
     {
         var cts = new CancellationTokenSource();
-        Server.RunOnTick(
-            Server.TickCount + ticks,
-            () =>
-            {
-                if (!cts.IsCancellationRequested)
-                    callback();
-            }
-        );
+        Server.RunOnTick(Server.TickCount + ticks, () =>
+        {
+            if (!cts.IsCancellationRequested)
+                callback();
+        });
         return cts;
     }
 }

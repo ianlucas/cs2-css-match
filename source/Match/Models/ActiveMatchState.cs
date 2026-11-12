@@ -102,7 +102,7 @@ public class ActiveMatchState : BaseState
             // Matchmaking warm-up points `nextlevel` at the next series map; clear it so the series
             // ends on the restart's round prestart, or when the next map loads.
             if (ConVars.IsMatchmaking.Value)
-                ConVar.Find("nextlevel")?.StringValue = "";
+                ConVar<string>.Find("nextlevel")?.Value = "";
         }
         Rules.MapEndResult = new MapEndResult
         {

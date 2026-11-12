@@ -270,7 +270,7 @@ public partial class LiveState
             {
                 Runtime.Log("No planted_c4 entity found, falling back to wall clock.");
                 var timeToDefuse = TimeHelper.Now() - _bombPlantedAt;
-                var c4Timer = (ConVar.Find("mp_c4timer")?.GetPrimitiveValue<int>() ?? 0) * 1000;
+                var c4Timer = (ConVar<int>.Find("mp_c4timer")?.Value ?? 0) * 1000;
                 bombTimeRemaining = c4Timer - timeToDefuse;
             }
             if (bombTimeRemaining < 0)

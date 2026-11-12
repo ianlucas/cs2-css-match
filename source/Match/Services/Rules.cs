@@ -122,7 +122,7 @@ public static class Rules
         )
         {
             // Next level change will be handled by the game.
-            if (ConVar.Find("nextlevel")?.StringValue != "")
+            if (ConVar<string>.Find("nextlevel")?.Value != "")
                 return true;
             DidRestartFirstMap = true;
             var currentMapName = currentMap?.MapName ?? currentInGameMap;
